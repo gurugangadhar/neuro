@@ -1,1294 +1,563 @@
-\# Argonaut — AI Maritime Voyage Decision System
+# 🧭 Argonaut
+### AI Maritime Voyage Decision System
 
+**An agentic AI decision system that weighs security risk, war-risk insurance, route economics, charter obligations, and customer impact — then hands back an explainable TRANSIT or REROUTE recommendation, complete with the math to back it up.**
 
+![Status](https://img.shields.io/badge/status-hackathon%20prototype-orange)
+![Framework](https://img.shields.io/badge/framework-neuro--san-76B900)
+![LLM](https://img.shields.io/badge/LLM-NVIDIA%20nemotron--3--super--120b-blue)
+![Language](https://img.shields.io/badge/language-python-3776AB)
+![License](https://img.shields.io/badge/license-unlicensed-lightgrey)
 
-> \*\*An agentic AI decision system that evaluates maritime voyage risk, economics, insurance, charter obligations, and customer impact to recommend whether a vessel should transit or reroute.\*\*
+---
 
+## Overview
 
+Every day, somewhere in the world, an operator has to decide whether a vessel should keep sailing through a corridor that just got a little more dangerous, or burn ten extra days going around it.
 
-\## Overview
+That decision isn't really one question — it's six questions stapled together: *How dangerous, really? What does insurance cost now? What does the diversion cost? What does the charter-party allow? What does the customer contract punish us for? And what's the weakest link in everything we just said?*
 
+**Argonaut** answers all six, in parallel, through six specialist AI agents — and then hands the evidence to a plain deterministic calculation instead of asking an LLM to "just do the math." The output is a **TRANSIT / REROUTE** recommendation with the numbers, the break-even points, a confidence score, and one honest red flag about the evidence itself.
 
+> This is a hackathon build. Read the [Disclaimer](#disclaimer) before you take it anywhere near a real ship.
 
-Maritime voyage decisions often require information from multiple domains at the same time:
+---
 
+## Table of Contents
 
+- [The Problem](#the-problem)
+- [Why We Built Argonaut](#why-we-built-argonaut)
+- [The Core Idea](#the-core-idea)
+- [Architecture](#architecture)
+- [Meet the Agents](#meet-the-agents)
+- [The Deterministic Decision Layer](#the-deterministic-decision-layer)
+- [Understanding the Output Metrics](#understanding-the-output-metrics)
+- [Example Walkthrough Transit Scenario](#example-walkthrough-transit-scenario)
+- [Example Walkthrough Reroute Scenario](#example-walkthrough-reroute-scenario)
+- [Input Validation](#input-validation)
+- [General Question Handling](#general-question-handling)
+- [Tech Stack](#tech-stack)
+- [Coded Tools](#coded-tools)
+- [Project Structure](#project-structure)
+- [Getting Started](#getting-started)
+- [Demo Flow](#demo-flow)
+- [Design Principles](#design-principles)
+- [Production Roadmap](#production-roadmap)
+- [FAQ](#faq)
+- [Disclaimer](#disclaimer)
+- [License](#license)
 
-\- Security and corridor threats
+---
 
-\- War-risk insurance
+## The Problem
 
-\- Route economics
+> **Should this vessel continue through a potentially dangerous corridor, or take a longer diversion?**
 
-\- Charter-party obligations
+In the real world, this question doesn't land on one desk — it lands on five:
 
-\- Customer delivery penalties
+| Desk | Question they're actually asking |
+|---|---|
+| Security / Ops | How bad is the corridor *right now*, and how fresh is that intel? |
+| Insurance / Risk | What does war-risk cover cost at this threat level? |
+| Chartering / Legal | What does the charter-party actually allow us to do here? |
+| Commercial | What do we owe the customer if we're late? |
+| Finance | Which option costs less, all-in? |
 
-\- Financial trade-offs
+Historically, someone stitches these five answers together by hand — a security bulletin here, an insurer's quote there, a chartering email, a customer SLA spreadsheet — under time pressure, with no consistent way to challenge the result before it ships. A single chatbot answer isn't good enough for a decision like this: it's too easy for one model, in one pass, to quietly blend security judgment with financial arithmetic and hand back a confident-sounding number that nobody can audit.
 
-\- Independent challenge of the proposed decision
+Argonaut is a **decision-support workflow**: dedicated specialists analyze each dimension independently, an adversarial reviewer challenges what they found, and only then does a plain calculation compare the two options.
 
+---
 
+## Why We Built Argonaut
 
-\*\*Argonaut\*\* brings these perspectives together through a multi-agent AI workflow.
+Maritime corridors have spent the last few years reminding everyone that "the shortest route" and "the right route" aren't always the same thing. When a key corridor becomes risky, operators don't get to disappear for a strategy offsite — they have to decide, often within hours, whether the extra fuel and days of a diversion are worth it against the threat, the insurance bill, and the contracts already in motion.
 
+We built Argonaut for a hackathon to show something more useful than "a chatbot that talks about shipping." Three ideas drove the build:
 
+1. **This is a multi-stakeholder decision wearing a single-question disguise.** "Transit or reroute?" sounds simple until you notice it depends on security, finance, law, and customer commitments simultaneously — which is exactly the kind of problem multi-agent orchestration exists for.
+2. **Money math should never be a guess.** Asking a language model to *compute* a financial comparison invites confident-sounding arithmetic that's subtly wrong. Argonaut treats the LLM agents as **evidence gatherers**, not calculators, and hands the actual comparison to deterministic Python code.
+3. **A recommendation without a challenge is a liability.** Any system that hands back "TRANSIT, trust me" without saying what could be wrong with that answer is a system nobody should rely on for something this consequential. So we gave the workflow a dedicated adversary — the **Skeptic** — whose only job is to find the crack in the evidence before the final number gets calculated.
 
-Instead of asking one AI model to make the entire decision, Argonaut assigns specialized responsibilities to multiple agents and then combines their findings through a deterministic decision calculation.
+The result is less "AI makes the call" and more "AI assembles a defensible case file, and arithmetic makes the call."
 
+---
 
+## The Core Idea
 
-The result is an explainable \*\*TRANSIT or REROUTE\*\* recommendation with:
+A single general-purpose agent *could* attempt this whole problem in one shot. We chose not to build it that way, because that approach quietly creates the failure modes below:
 
-
-
-\- Key financial numbers
-
-\- Threat probability
-
-\- Confidence score
-
-\- Break-even conditions
-
-\- A final red-team challenge
-
-
-
-\---
-
-
-
-\# The Problem
-
-
-
-A maritime operator may need to decide:
-
-
-
-> \*\*Should this vessel continue through a potentially dangerous corridor or take a longer diversion?\*\*
-
-
-
-The answer cannot be based on security risk alone.
-
-
-
-A decision may depend on:
-
-
-
-\- Probability of an incident
-
-\- War-risk insurance premium
-
-\- Additional sailing days
-
-\- Additional fuel/route cost
-
-\- Customer delivery penalties
-
-\- Charter-party clauses
-
-\- Crew rights and operational constraints
-
-\- Quality and freshness of available intelligence
-
-
-
-A simple chatbot response is not sufficient for this type of decision.
-
-
-
-Argonaut is designed as a \*\*decision-support workflow\*\*, where specialized agents independently analyze different dimensions before a final recommendation is produced.
-
-
-
-\---
-
-
-
-\# Solution
-
-
-
-Argonaut uses a multi-agent architecture:
-
-
+| | One Big LLM Call | Argonaut (Multi-Agent + Deterministic Math) |
+|---|---|---|
+| Domain reasoning | Security, insurance, and finance judgment blend together | Each domain has its own dedicated agent and tool |
+| Financial arithmetic | Model computes numbers itself — hallucination risk | Handed off to `decision_math`, plain Python, zero LLM involvement |
+| Auditability | Hard to say *why* it landed on this answer | Every specialist's findings are explicit and inspectable |
+| Adversarial review | None by default | `Skeptic` is a required step before calculation |
+| Extending the system | Rewriting one giant prompt | Add a new agent + coded tool for the new domain |
+| Failure isolation | One bad assumption poisons the whole answer | A weak input surfaces as a named finding, not a silent blend |
 
 ```text
-
-&#x20;                        ┌─────────────────────┐
-
-&#x20;                        │ Voyage\_Commander     │
-
-&#x20;                        │   Orchestrator       │
-
-&#x20;                        └──────────┬──────────┘
-
-&#x20;                                   │
-
-&#x20;             ┌─────────────────────┼─────────────────────┐
-
-&#x20;             │                     │                     │
-
-&#x20;             ▼                     ▼                     ▼
-
-&#x20;      ┌─────────────┐       ┌─────────────┐       ┌─────────────┐
-
-&#x20;      │   Sentinel  │       │    Broker   │       │  Helmsman   │
-
-&#x20;      │ Security    │       │ Insurance   │       │ Route/Econ. │
-
-&#x20;      └──────┬──────┘       └──────┬──────┘       └──────┬──────┘
-
-&#x20;             │                     │                     │
-
-&#x20;             └─────────────────────┼─────────────────────┘
-
-&#x20;                                   │
-
-&#x20;                        ┌──────────┴──────────┐
-
-&#x20;                        │                     │
-
-&#x20;                        ▼                     ▼
-
-&#x20;                 ┌─────────────┐       ┌─────────────┐
-
-&#x20;                 │   Counsel   │       │    Ledger   │
-
-&#x20;                 │  Charter    │       │  Customer   │
-
-&#x20;                 │ Constraints │       │   Impact    │
-
-&#x20;                 └──────┬──────┘       └──────┬──────┘
-
-&#x20;                        │                     │
-
-&#x20;                        └──────────┬──────────┘
-
-&#x20;                                   │
-
-&#x20;                                   ▼
-
-&#x20;                           ┌─────────────┐
-
-&#x20;                           │   Skeptic   │
-
-&#x20;                           │ Red-Team    │
-
-&#x20;                           └──────┬──────┘
-
-&#x20;                                  │
-
-&#x20;                                  ▼
-
-&#x20;                          ┌────────────────┐
-
-&#x20;                          │ decision\_math  │
-
-&#x20;                          │ Deterministic  │
-
-&#x20;                          │ Calculation    │
-
-&#x20;                          └───────┬────────┘
-
-&#x20;                                  │
-
-&#x20;                                  ▼
-
-&#x20;                        ┌─────────────────────┐
-
-&#x20;                        │ Voyage\_Commander    │
-
-&#x20;                        │ Final Decision      │
-
-&#x20;                        └─────────────────────┘
-
+Security  ─┐
+Insurance ─┤
+Economics ─┼──►  Independent Review (Skeptic)  ──►  Deterministic Calculation  ──►  Decision
+Charter   ─┤
+Customer  ─┘
 ```
 
-
-
-\---
-
-
-
-\# Agents
-
-
-
-\## Voyage\_Commander
-
-
-
-The front-facing orchestrator.
-
-
-
-Responsibilities:
-
-
-
-\- Collect required voyage inputs
-
-\- Coordinate specialist agents
-
-\- Ensure specialist findings are explicitly passed between stages
-
-\- Trigger the red-team review
-
-\- Run deterministic decision calculations
-
-\- Produce the final voyage decision brief
-
-
-
-\---
-
-
-
-\## Sentinel
-
-
-
-\*\*Security and threat intelligence specialist\*\*
-
-
-
-Analyzes the selected maritime corridor.
-
-
-
-Provides:
-
-
-
-\- Threat level
-
-\- Threat probability
-
-\- Incident age
-
-\- JWC listing status
-
-\- Threat intelligence warning
-
-
-
-\---
-
-
-
-\## Broker
-
-
-
-\*\*War-risk insurance specialist\*\*
-
-
-
-Calculates an illustrative insurance premium based on:
-
-
-
-\- Cargo value
-
-\- Threat level
-
-\- Vessel class
-
-\- Corridor
-
-
-
-\---
-
-
-
-\## Helmsman
-
-
-
-\*\*Route and voyage economics specialist\*\*
-
-
-
-Evaluates the diversion.
-
-
-
-Provides:
-
-
-
-\- Additional sailing days
-
-\- Additional reroute cost
-
-\- Route economics
-
-
-
-\---
-
-
-
-\## Counsel
-
-
-
-\*\*Charter-party specialist\*\*
-
-
-
-Reviews charter-specific constraints.
-
-
-
-Considers:
-
-
-
-\- War-risk clauses
-
-\- Safe-port warranties
-
-\- AIS requirements
-
-\- Crew rights
-
-
-
-\---
-
-
-
-\## Ledger
-
-
-
-\*\*Customer and financial impact specialist\*\*
-
-
-
-Evaluates customer consequences such as:
-
-
-
-\- Delivery-window requirements
-
-\- Late-delivery penalties
-
-\- Contractual financial exposure
-
-
-
-\---
-
-
-
-\## Skeptic
-
-
-
-\*\*Independent red-team reviewer\*\*
-
-
-
-Argonaut does not allow the final recommendation to pass without challenge.
-
-
-
-Skeptic reviews the collected specialist findings and identifies \*\*exactly one material weakness\*\*, such as:
-
-
-
-\- Stale threat intelligence
-
-\- Unsupported assumptions
-
-\- Inconsistent numbers
-
-\- Missing information
-
-\- Dependencies between findings
-
-
-
-This creates an explicit challenge layer before the final decision.
-
-
-
-\---
-
-
-
-\# Deterministic Decision Layer
-
-
-
-The final recommendation is not based purely on an LLM-generated opinion.
-
-
-
-Argonaut passes the collected evidence into `decision\_math`.
-
-
-
-The calculation compares the expected cost of continuing through the corridor against the cost of rerouting.
-
-
-
-Conceptually:
-
-
-
-```text
-
-Transit Expected Cost
-
-&#x20;       vs.
-
-Reroute Cost
-
+---
+
+## Architecture
+
+`Voyage_Commander` orchestrates six specialists across two stages, routes everything through an adversarial review, and only then triggers the deterministic calculation.
+
+```mermaid
+flowchart TD
+    VC0[["Voyage_Commander — Orchestrator"]]
+    S["Sentinel<br/>Security & Threat Intel"]
+    B["Broker<br/>War-Risk Insurance"]
+    H["Helmsman<br/>Route & Voyage Economics"]
+    C["Counsel<br/>Charter-Party Constraints"]
+    L["Ledger<br/>Customer & Financial Impact"]
+    SK{"Skeptic<br/>Red-Team Challenge"}
+    DM[["decision_math<br/>Deterministic Calculation"]]
+    VC1[["Voyage_Commander — Final Decision Brief"]]
+
+    VC0 --> S & B & H
+    S --> C & L
+    B --> C & L
+    H --> C & L
+    C --> SK
+    L --> SK
+    SK --> DM
+    DM --> VC1
 ```
 
+**Why the shape matters:** Sentinel, Broker, and Helmsman never talk to each other — they each analyze one corridor independently and pass structured findings *explicitly* to the next stage. Nothing relies on shared conversational memory. Counsel and Ledger then layer legal and commercial context on top of that evidence. Skeptic sees the whole picture and is the last voice before numbers get crunched — by design, it cannot see or influence the final calculation, only the evidence feeding it.
 
+---
 
-The system also calculates:
+## Meet the Agents
 
+Each agent has exactly one job. That's deliberate — a narrow mandate is easier to prompt well, easier to test, and easier to trust.
 
+### Voyage_Commander — the Orchestrator
 
-\- Expected cost difference
+**Role:** The front door. Collects the voyage scenario, validates it, coordinates every specialist in order, triggers the red-team review, runs the deterministic calculation, and writes the final brief.
 
-\- Financial margin
+**Why it exists:** Somebody has to own sequencing and make sure findings are actually *handed off* rather than assumed. Without an orchestrator, you either get one model trying to hold six roles in its head at once, or six independent agents that never converge on a single answer.
 
-\- Insurance break-even point
+**Think of it like:** the bridge officer running the whole watch — not the expert on any one thing, but the one making sure every expert's report reaches the captain in order.
 
-\- Reroute-cost break-even point
+### Sentinel — Security & Threat Intelligence
 
-\- Customer-penalty break-even point
+**Role:** Reads the selected corridor and reports threat level, threat probability, how old the incident data is, whether the corridor is on a JWC (Joint War Committee) listing, and any active intelligence warning.
 
-\- Confidence
+**Why it exists:** Threat assessment is a *judgment call under uncertainty*, and it ages fast — a 3-day-old report and a 30-day-old report are not the same evidence. Isolating this into its own agent means threat judgment never gets casually mixed with a cost calculation, and its output carries an explicit age so staleness can be checked later.
 
+**Outputs:** Threat Level · Threat Probability · Incident Age · JWC Listed (Y/N) · Warning notes
 
+### Broker — War-Risk Insurance
 
-This makes the final recommendation auditable and explainable.
+**Role:** Prices an illustrative war-risk premium from cargo value, threat level, vessel class, and corridor.
 
+**Why it exists:** Insurance pricing is its own discipline with its own inputs — it shouldn't be improvised by whichever agent happens to be reasoning about risk at the time. Isolating it also makes the premium a clean, reusable number for the final comparison and for the insurance break-even calculation.
 
+**Outputs:** Illustrative War-Risk Premium ($)
 
-\---
+### Helmsman — Route & Voyage Economics
 
+**Role:** Evaluates the diversion — extra sailing days and the additional cost of actually taking the long way around.
 
+**Why it exists:** "How much does rerouting cost?" sounds like a rounding exercise, but it's really a routing-and-fuel-economics problem with its own assumptions (speed, bunker cost, port calls). Keeping it separate from Sentinel means a security judgment never quietly leaks into a fuel-cost number, or vice versa.
 
-\# Example Decision
+**Outputs:** Additional Sailing Days · Reroute Cost ($)
 
+### Counsel — Charter-Party Specialist
 
+**Role:** Reviews the charter-party for war-risk clauses, safe-port warranties, AIS requirements, and crew rights that might constrain the decision entirely, regardless of what the economics say.
 
-\## Scenario
+**Why it exists:** A financially attractive option can still be *contractually off the table*. Legal constraints are categorical, not probabilistic — Counsel exists so a clause like "master may refuse an unsafe port" doesn't get lost inside a cost-benefit narrative.
 
+**Outputs:** Applicable clauses · Constraints on transit or reroute · Crew-rights notes
 
+### Ledger — Customer & Financial Impact
+
+**Role:** Evaluates what happens to the customer relationship — delivery-window requirements and the financial exposure of a late-delivery penalty.
+
+**Why it exists:** The "cheapest" option on paper can be the most expensive option once a contractual penalty clock starts ticking. Ledger keeps that exposure explicit and separate from insurance or fuel costs so it can be weighed — and shown — on its own line.
+
+**Outputs:** Delivery Window · Late-Delivery Penalty ($) · Contractual Exposure notes
+
+### Skeptic — Independent Red-Team Reviewer
+
+**Role:** Looks at everything Sentinel, Broker, Helmsman, Counsel, and Ledger produced and identifies **exactly one** material weakness — stale intel, an unsupported assumption, a numeric inconsistency, a missing input, or a hidden dependency between two findings.
+
+**Why it exists:** This is the agent that keeps Argonaut honest. A recommendation engine that never says "but here's what could be wrong with this" is a recommendation engine people will eventually trust too much. Skeptic's mandate is intentionally narrow — one weakness, not a rewrite of the whole analysis — so the challenge stays sharp instead of turning into a second, competing opinion.
+
+**Think of it like:** the second officer whose only job in the room is to ask *"wait, are we sure about that?"* — once, clearly, before anyone signs off.
+
+---
+
+## The Deterministic Decision Layer
+
+Everything above this line is language-model reasoning. Everything below it is not.
+
+Argonaut passes the collected specialist evidence — threat probability, insurance premium, reroute cost, customer penalty, charter constraints, and the Skeptic's flagged weakness — into a single coded tool: **`decision_math`**. No LLM touches the arithmetic. Conceptually, it's comparing:
 
 ```text
-
-Vessel: Ocean Pioneer
-
-Vessel Class: VLCC
-
-Cargo: Crude Oil
-
-Cargo Value: $120M
-
-Direct Route: Red Sea / Bab-el-Mandeb via Suez Canal
-
-Diversion: Cape of Good Hope
-
-Customer: CUST-001
-
-Charter: Time Charter
-
+Transit Expected Cost   vs.   Reroute Cost
 ```
 
+...and from that comparison, deriving:
 
+- **Expected cost difference** — the raw gap between the two options
+- **Financial margin** — how decisively one option beats the other
+- **Insurance break-even** — how expensive the war-risk premium would have to get before rerouting becomes the cheaper call
+- **Reroute-cost break-even** — how cheap the diversion would have to get before it flips the recommendation
+- **Customer-penalty break-even** — how large the late-delivery penalty would have to get before it flips the recommendation
+- **Confidence** — how much margin separates the two options, tempered by how strong or shaky the underlying evidence is
 
-\### Specialist Findings
+Because this step is ordinary code instead of a model call, the same inputs always produce the same output — which is the entire point when the answer needs to survive being questioned by an underwriter, a lawyer, or a customer later.
 
+> **Worked arithmetic, for the Transit example below** (illustrative — the exact internal weighting lives in `decision_math.py`):
+> - Transit Expected Cost `$1,414,800` ≈ Insurance Premium `$1,080,000` scaled up by the 31% threat probability
+> - Reroute Cost `$1,884,000` = Reroute Cost `$884,000` **+** Customer Penalty `$1,000,000` (the diversion is what causes the delivery to miss its window)
+> - Financial Advantage `$469,200` = Reroute Cost − Transit Expected Cost
 
+---
 
-\*\*Sentinel\*\*
+## Understanding the Output Metrics
 
+A quick glossary, since these terms do a lot of work in the final brief:
 
+| Term | What it actually means |
+|---|---|
+| **Threat Probability** | Sentinel's estimated likelihood of an incident if the vessel transits the corridor |
+| **Transit Expected Cost** | The risk-adjusted cost of continuing through the corridor (insurance exposure weighted by threat) |
+| **Reroute Cost** | The total cost of diverting — extra fuel/days *plus* any customer penalty the delay still triggers |
+| **Financial Advantage / Margin** | The dollar gap between the two options; bigger margin = clearer call |
+| **Insurance Break-even** | The premium level at which the two options cost the same — a gauge of how sensitive the call is to insurance pricing |
+| **Reroute-Cost Break-even** | The diversion cost at which the recommendation would flip |
+| **Customer-Penalty Break-even** | The penalty size at which the recommendation would flip |
+| **Confidence** | How much the margin — and the quality of the evidence behind it — supports trusting this recommendation |
 
-```text
+---
 
-Threat Level: Elevated
+## Example Walkthrough Transit Scenario
 
-Threat Probability: 31%
+**Scenario**
 
-Incident Age: 9 days
+| Field | Value |
+|---|---|
+| Vessel | Ocean Pioneer |
+| Vessel Class | VLCC |
+| Cargo | Crude Oil |
+| Cargo Value | $120,000,000 |
+| Direct Route | Red Sea / Bab-el-Mandeb via Suez Canal |
+| Diversion | Cape of Good Hope |
+| Customer | CUST-001 |
+| Charter | Time Charter |
 
-JWC Listed: Yes
+**Specialist Findings**
 
-```
+| Agent | Finding |
+|---|---|
+| Sentinel | Threat Level: **Elevated** · Threat Probability: **31%** · Incident Age: **9 days** · JWC Listed: **Yes** |
+| Broker | Insurance Premium: **$1,080,000** |
+| Helmsman | Additional Days: **10** · Reroute Cost: **$884,000** |
+| Ledger | Customer Penalty: **$1,000,000** |
 
-
-
-\*\*Broker\*\*
-
-
-
-```text
-
-Insurance Premium: $1,080,000
-
-```
-
-
-
-\*\*Helmsman\*\*
-
-
-
-```text
-
-Additional Days: 10
-
-Reroute Cost: $884,000
-
-```
-
-
-
-\*\*Ledger\*\*
-
-
-
-```text
-
-Customer Penalty: $1,000,000
-
-```
-
-
-
-\### Deterministic Calculation
-
-
+**Deterministic Calculation**
 
 ```text
-
 Transit Expected Cost: $1,414,800
-
-Reroute Cost:          $1,884,000
-
-
-
-Financial Advantage:   $469,200
-
+Reroute Cost:           $1,884,000
+Financial Advantage:      $469,200
 ```
 
+> **Recommendation: TRANSIT** — Confidence: **74.9%**
 
+**Red-Team Challenge (Skeptic)**
 
-\### Final Decision
+> Stale threat data: incident data is 9 days old, exceeding the 7-day freshness threshold.
 
+This is the property that makes Argonaut worth building: **it can recommend the financially preferable action while explicitly exposing the one thing that could invalidate that recommendation.** Nothing gets swept under the rug to make the answer look cleaner than it is.
 
+---
 
-```text
+## Example Walkthrough Reroute Scenario
 
-RECOMMENDATION: TRANSIT
+Change the corridor and the economics, and Argonaut changes its mind — it isn't hard-coded toward either answer.
 
+| Field | Value |
+|---|---|
+| Direct Route | Strait of Hormuz |
+| Diversion | Strait of Malacca |
+| Threat Probability | 54% |
+| Insurance Premium | $3,600,000 |
+| Reroute Cost | $884,000 |
 
+> **Recommendation: REROUTE** — Confidence: **95%**
 
-Confidence: 74.9%
+Same workflow, same agents, same deterministic layer — different evidence, different answer.
 
-```
+---
 
+## Input Validation
 
-
-\### Red-Team Challenge
-
-
-
-```text
-
-Stale threat data:
-
-incident data is 9 days old,
-
-exceeding the 7-day freshness threshold.
-
-```
-
-
-
-This demonstrates an important property of Argonaut:
-
-
-
-> \*\*The system can recommend a financially preferable action while explicitly exposing the weakness that could invalidate the decision.\*\*
-
-
-
-\---
-
-
-
-\# Opposite Decision Scenario
-
-
-
-Argonaut can also produce a different decision when the threat and economics change.
-
-
-
-Example:
-
-
+Before any specialist agent runs, `Voyage_Commander` checks that the scenario actually contains what the workflow needs:
 
 ```text
-
-Direct Route: Strait of Hormuz
-
-Diversion:    Strait of Malacca
-
-
-
-Threat:       54%
-
-Insurance:    $3.6M
-
-Reroute Cost: $884K
-
-```
-
-
-
-The deterministic decision layer recommends:
-
-
-
-```text
-
-RECOMMENDATION: REROUTE
-
-
-
-Confidence: 95%
-
-```
-
-
-
-This demonstrates that Argonaut is not hard-coded to always recommend rerouting.
-
-
-
-The recommendation changes based on the collected evidence and deterministic calculations.
-
-
-
-\---
-
-
-
-\# Input Validation
-
-
-
-Argonaut validates required voyage information before starting the specialist workflow.
-
-
-
-Required inputs:
-
-
-
-```text
-
 Vessel Class
-
 Cargo Value
-
 Direct Route
-
 Diversion Route
-
 Customer Reference
-
 Charter Type
-
 ```
 
-
-
-If required information is missing, the system stops before invoking specialist agents.
-
-
-
-Example:
-
-
+If anything is missing, Argonaut stops **before** spending a single specialist call:
 
 ```text
-
 I'm missing one required field to begin the assessment:
 
-
-
 Charter type
-
 ```
 
+This keeps the system from producing a confident-sounding decision on an incomplete picture — and keeps hackathon demo runs from burning agent calls on scenarios that were never going to work anyway.
 
+---
 
-This prevents the system from producing a decision from incomplete voyage information.
+## General Question Handling
 
+Not every message is a voyage decision. Argonaut distinguishes between:
 
-
-\---
-
-
-
-\# General Question Handling
-
-
-
-Argonaut is also designed to distinguish between:
-
-
-
-\### Voyage decision requests
-
-
-
-These trigger the multi-agent workflow.
-
-
-
-\### General maritime questions
-
-
-
-These can be answered directly without unnecessarily launching the full specialist workflow.
-
-
-
-For example:
-
-
+- **Voyage decision requests** — a specific vessel, route, and cargo situation → triggers the full multi-agent workflow.
+- **General maritime questions** — conceptual or definitional → answered directly.
 
 ```text
-
 "What is the difference between Time Charter and Voyage Charter?"
-
 ```
 
+...doesn't need six specialist agents and a deterministic calculation to answer. `Voyage_Commander` recognizes this isn't a decision request and responds directly, which keeps the demo from launching the entire pipeline for questions that don't need it.
 
+---
 
-does not require a complete voyage-risk assessment.
+## Tech Stack
 
+| Layer | Choice |
+|---|---|
+| Orchestration framework | **Neuro SAN** (`neuro-san`) |
+| Language | Python |
+| Agent configuration | HOCON |
+| LLM | NVIDIA-hosted `nvidia/nemotron-3-super-120b-a12b` |
+| Domain logic | Coded Tools (deterministic Python, not LLM calls) |
+| Decision layer | Deterministic calculation (`decision_math`) |
 
+---
 
-This helps prevent unnecessary agent execution.
+## Coded Tools
 
+Every domain calculation or lookup that *must* be reliable is implemented as a coded tool rather than left to model generation:
 
+| Tool | Used by | Purpose |
+|---|---|---|
+| `zone_threat_lookup` | Sentinel | Synthetic corridor threat intelligence |
+| `war_risk_pricing` | Broker | Illustrative war-risk insurance calculation |
+| `voyage_economics` | Helmsman | Diversion route economics |
+| `charter_clause_lookup` | Counsel | Charter-party clause lookup |
+| `customer_contract_lookup` | Ledger | Customer contractual impact |
+| `decision_math` | Voyage_Commander | Deterministic final cost comparison |
 
-\---
-
-
-
-\# Technology Stack
-
-
-
-\- \*\*Neuro SAN / neuro-san\*\*
-
-\- Python
-
-\- HOCON agent configuration
-
-\- NVIDIA hosted LLM
-
-\- Coded Tools
-
-\- Multi-agent orchestration
-
-\- Deterministic decision calculations
-
-
-
-Current model configuration:
-
-
+The architecture deliberately separates four concerns that are easy to accidentally blend:
 
 ```text
-
-nvidia/nemotron-3-super-120b-a12b
-
+AI reasoning  →  domain evidence  →  deterministic calculation  →  final explanation
 ```
 
+---
 
-
-\---
-
-
-
-\# Coded Tools
-
-
-
-Argonaut uses deterministic coded tools for domain calculations and lookups.
-
-
+## Project Structure
 
 ```text
-
-zone\_threat\_lookup
-
-&#x20;       │
-
-&#x20;       └── Synthetic corridor threat intelligence
-
-
-
-war\_risk\_pricing
-
-&#x20;       │
-
-&#x20;       └── Illustrative war-risk insurance calculation
-
-
-
-voyage\_economics
-
-&#x20;       │
-
-&#x20;       └── Diversion economics
-
-
-
-charter\_clause\_lookup
-
-&#x20;       │
-
-&#x20;       └── Charter-party clause lookup
-
-
-
-customer\_contract\_lookup
-
-&#x20;       │
-
-&#x20;       └── Customer contractual impact
-
-
-
-decision\_math
-
-&#x20;       │
-
-&#x20;       └── Deterministic final cost comparison
-
-```
-
-
-
-The architecture intentionally separates:
-
-
-
-\*\*AI reasoning → domain evidence → deterministic calculation → final explanation\*\*
-
-
-
-\---
-
-
-
-\# Why Multi-Agent?
-
-
-
-A single general-purpose agent could attempt to solve the entire problem, but that creates several risks:
-
-
-
-\- Mixed responsibilities
-
-\- Hidden assumptions
-
-\- Difficult debugging
-
-\- Poor explainability
-
-\- Harder validation
-
-
-
-Argonaut instead gives each agent a clearly defined responsibility.
-
-
-
-```text
-
-Security
-
-Insurance
-
-Route Economics
-
-Charter
-
-Customer Impact
-
-&#x20;       ↓
-
-Independent Review
-
-&#x20;       ↓
-
-Deterministic Calculation
-
-&#x20;       ↓
-
-Decision
-
-```
-
-
-
-This makes the workflow easier to understand, test, and extend.
-
-
-
-\---
-
-
-
-\# Why the Skeptic Agent?
-
-
-
-The Skeptic is intentionally placed immediately before the final calculation.
-
-
-
-Its job is not to make another recommendation.
-
-
-
-Its job is to ask:
-
-
-
-> \*\*"What is the biggest weakness in the evidence supporting this decision?"\*\*
-
-
-
-This adds a red-team layer to the decision process.
-
-
-
-\---
-
-
-
-\# Demo Flow
-
-
-
-A typical demonstration follows this sequence:
-
-
-
-```text
-
-1\. Enter voyage scenario
-
-
-
-2\. Voyage\_Commander validates inputs
-
-
-
-3\. Sentinel evaluates corridor risk
-
-
-
-4\. Broker calculates insurance exposure
-
-
-
-5\. Helmsman evaluates rerouting economics
-
-
-
-6\. Counsel evaluates charter constraints
-
-
-
-7\. Ledger evaluates customer impact
-
-
-
-8\. Skeptic identifies one material weakness
-
-
-
-9\. decision\_math performs deterministic comparison
-
-
-
-10\. Voyage\_Commander produces final decision brief
-
-```
-
-
-
-\---
-
-
-
-\# Production Considerations
-
-
-
-The current implementation is a \*\*hackathon demonstration and decision-support prototype\*\*.
-
-
-
-Several components intentionally use synthetic data.
-
-
-
-In a production implementation, these could be replaced with:
-
-
-
-\- Live maritime threat intelligence
-
-\- Current war-risk insurance quotes
-
-\- AIS data
-
-\- Weather and routing data
-
-\- Real charter-party documents
-
-\- Customer contract systems
-
-\- Real-time voyage economics
-
-\- Human approval workflows
-
-
-
-Argonaut should therefore be treated as a \*\*decision-support system\*\*, not an autonomous replacement for maritime operators, legal professionals, insurers, or security teams.
-
-
-
-\---
-
-
-
-\# Project Structure
-
-
-
-```text
-
 neuro-san-practice/
-
 │
-
 ├── config/
-
-│   └── llm\_config.hocon
-
+│   └── llm_config.hocon              # LLM + API configuration
 │
-
 ├── registries/
-
-│   ├── manifest.hocon
-
-│   └── argonaut.hocon
-
+│   ├── manifest.hocon                # Registers available agent networks
+│   └── argonaut.hocon                # Argonaut's agent topology & prompts
 │
-
-├── coded\_tools/
-
+├── coded_tools/
 │   └── argonaut/
-
-│       ├── zone\_threat.py
-
-│       ├── war\_risk\_pricing.py
-
-│       ├── voyage\_economics.py
-
-│       ├── charter\_clauses.py
-
-│       ├── customer\_contract.py
-
-│       └── decision\_math.py
-
+│       ├── zone_threat.py            # Sentinel's tool
+│       ├── war_risk_pricing.py       # Broker's tool
+│       ├── voyage_economics.py       # Helmsman's tool
+│       ├── charter_clauses.py        # Counsel's tool
+│       ├── customer_contract.py      # Ledger's tool
+│       └── decision_math.py          # Final deterministic calculation
 │
-
 ├── .gitignore
-
 └── README.md
-
 ```
 
+---
 
+## Getting Started
 
-\---
+**Prerequisites**
+- Python 3.10+
+- `neuro-san` installed in your environment
+- NVIDIA hosted LLM access configured in `config/llm_config.hocon`
 
-
-
-\# Running Argonaut
-
-
-
-Create and activate the Python environment:
-
-
+**1. Create and activate the environment**
 
 ```powershell
-
-.venv\\Scripts\\activate
-
+# Windows (PowerShell)
+.venv\Scripts\activate
 ```
 
+```bash
+# macOS / Linux
+source .venv/bin/activate
+```
 
-
-Start Neuro SAN:
-
-
+**2. Start Neuro SAN**
 
 ```powershell
-
 ns run
-
 ```
 
-
-
-Open the Neuro SAN Studio interface and select:
-
-
+**3. Open the Neuro SAN Studio interface and select**
 
 ```text
-
 argonaut
-
 ```
 
+**4. Provide a voyage scenario** containing all six required fields, and let the specialists take it from there.
+
+---
+
+## Demo Flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as Operator
+    participant VC as Voyage_Commander
+    participant S as Sentinel
+    participant B as Broker
+    participant H as Helmsman
+    participant C as Counsel
+    participant L as Ledger
+    participant SK as Skeptic
+    participant DM as decision_math
+
+    U->>VC: Voyage scenario
+    VC->>VC: Validate required inputs
+    VC->>S: Assess corridor risk
+    VC->>B: Price war-risk insurance
+    VC->>H: Evaluate diversion economics
+    S-->>VC: Threat findings
+    B-->>VC: Premium estimate
+    H-->>VC: Reroute cost & days
+    VC->>C: Review charter constraints
+    VC->>L: Assess customer impact
+    C-->>VC: Charter findings
+    L-->>VC: Penalty exposure
+    VC->>SK: Challenge the collected evidence
+    SK-->>VC: One material weakness
+    VC->>DM: Run deterministic comparison
+    DM-->>VC: TRANSIT / REROUTE + confidence
+    VC->>U: Final decision brief
+```
+
+---
+
+## Design Principles
+
+| Principle | What it means | Why it matters |
+|---|---|---|
+| **Specialized agents** | Each agent has exactly one responsibility | Narrow mandates are easier to prompt, test, and trust |
+| **Explicit evidence passing** | Findings move between stages as structured hand-offs, not shared chat memory | No silent assumptions leak between domains |
+| **Deterministic calculations** | The financial comparison is code, not a model guess | The final numbers are reproducible and auditable |
+| **Red-team review** | Skeptic challenges the evidence before the calculation runs | The system names its own weak point instead of hiding it |
+| **Explainable decisions** | The final brief shows the numbers and break-even conditions | A recommendation without its reasoning isn't a decision — it's a guess |
+| **Graceful validation** | Incomplete scenarios are rejected up front | No specialist agent runs on a scenario that was never going to work |
+
+---
+
+## Production Roadmap
+
+This build leans on synthetic data by design. Getting from hackathon demo to something a real operator could rely on would mean replacing each of these:
+
+- [ ] Live maritime threat intelligence feed (replacing `zone_threat_lookup`'s synthetic data)
+- [ ] Real-time war-risk insurance quotes (replacing illustrative pricing)
+- [ ] AIS data integration for live vessel positioning
+- [ ] Weather and routing data feeds
+- [ ] Real charter-party document ingestion (not lookup stubs)
+- [ ] Live customer contract system integration
+- [ ] Real-time voyage economics (bunker prices, port costs, currency)
+- [ ] Human approval checkpoints before any recommendation is actioned
+- [ ] Audit logging of every specialist finding and Skeptic challenge
+- [ ] Legal and compliance review of the decision framework itself
+
+---
+
+## FAQ
+
+<details>
+<summary><strong>Does Argonaut make the final call on its own?</strong></summary>
+<br>
+No. It's a decision-support system. It produces a structured, explainable recommendation — the actual go/no-go call belongs to the operator, insurer, or legal team reviewing the brief.
+</details>
+
+<details>
+<summary><strong>Why not just ask one LLM to reason through everything and give a number?</strong></summary>
+<br>
+Because that blends judgment and arithmetic in one pass, which is exactly where confident-sounding but wrong answers come from. See <a href="#the-core-idea">The Core Idea</a>.
+</details>
+
+<details>
+<summary><strong>Is the threat, insurance, and contract data real?</strong></summary>
+<br>
+No — it's synthetic and illustrative for this hackathon build. See the <a href="#disclaimer">Disclaimer</a>.
+</details>
+
+<details>
+<summary><strong>What happens if I give it an incomplete scenario?</strong></summary>
+<br>
+Voyage_Commander stops before running any specialist agent and tells you exactly which field is missing. See <a href="#input-validation">Input Validation</a>.
+</details>
+
+<details>
+<summary><strong>Can it actually recommend REROUTE, or does it always say TRANSIT?</strong></summary>
+<br>
+It genuinely goes either way based on the evidence — see the <a href="#example-walkthrough-reroute-scenario">Reroute Scenario</a> example.
+</details>
 
+---
 
-Then provide a voyage scenario containing all required inputs.
+## Disclaimer
 
+> [!WARNING]
+> **Argonaut is a hackathon prototype.**
+>
+> Threat intelligence, insurance pricing, contractual clauses, and other domain information used in this demonstration may be synthetic or illustrative and **must not be treated as real-world operational advice**.
+>
+> Production deployment would require validated data sources, domain-specific controls, human oversight, and appropriate legal and operational review. Argonaut should be treated as a decision-*support* system, not an autonomous replacement for maritime operators, legal professionals, insurers, or security teams.
 
+---
 
-\---
+## License
 
+No license file is currently included — this is an internal hackathon prototype. Add a license (MIT, Apache-2.0, or your organization's standard) before distributing this outside the team.
 
+---
 
-\# Key Design Principles
+### Hackathon Summary
 
+Argonaut demonstrates how agentic AI can coordinate specialized reasoning across a genuinely complex business decision, instead of building yet another generic chatbot. The goal was never to *generate an answer* — it was to produce one that's **structured, challenged, and explainable**:
 
-
-\### 1. Specialized agents
-
-
-
-Each agent has one clear responsibility.
-
-
-
-\### 2. Explicit evidence passing
-
-
-
-Specialist findings are explicitly passed to downstream agents rather than relying on conversational memory.
-
-
-
-\### 3. Deterministic calculations
-
-
-
-Critical financial comparisons are performed by coded logic.
-
-
-
-\### 4. Red-team review
-
-
-
-The Skeptic challenges the evidence before the final recommendation.
-
-
-
-\### 5. Explainable decisions
-
-
-
-The final response exposes the major numbers and break-even conditions.
-
-
-
-\### 6. Graceful validation
-
-
-
-Incomplete scenarios are rejected before unnecessary specialist execution.
-
-
-
-\---
-
-
-
-\# Hackathon Summary
-
-
-
-\*\*Argonaut\*\* demonstrates how agentic AI can be used to coordinate specialized reasoning across a complex business decision.
-
-
-
-Instead of building another generic chatbot, Argonaut focuses on a high-impact decision problem:
-
-
-
-> \*\*How should a maritime operator balance security risk, insurance exposure, route economics, contractual obligations, and customer impact when choosing between transit and rerouting?\*\*
-
-
-
-The goal is not simply to generate an answer.
-
-
-
-The goal is to produce a \*\*structured, challenged, explainable decision.\*\*
-
-
-
-\---
-
-
-
-\## Disclaimer
-
-
-
-Argonaut is a hackathon prototype.
-
-
-
-Threat intelligence, insurance pricing, contractual clauses, and other domain information used in the demonstration may be synthetic or illustrative and must not be treated as real-world operational advice.
-
-
-
-Production deployment would require validated data sources, domain-specific controls, human oversight, and appropriate legal and operational review.
-
+> How should a maritime operator balance security risk, insurance exposure, route economics, contractual obligations, and customer impact when choosing between transit and rerouting?
